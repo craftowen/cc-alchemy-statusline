@@ -321,6 +321,7 @@ function main() {
   parts.push(`${pcolor(cp)}${ftok(ut)}${DIM}/${ftok(cs)}${RST}`);
 
   // 5h / 7d usage with reset timer
+  const usageStart = parts.length;
   const now = Date.now();
   for (const [label, key] of [
     ["5h", "five_hour"],
@@ -348,10 +349,19 @@ function main() {
     }
   }
 
-  // Reset prefix overrides Claude Code's dim styling + non-breaking spaces prevent trimming
-  let output = parts.join(SEP);
-  output = "\x1b[0m" + output.replace(/ /g, "\u00A0");
-  console.log(output);
+  // Auto line-wrap: split into 2 lines when terminal is too narrow
+  const strip = (s) => s.replace(/\x1b(?:\[[0-9;]*m|\]8;;[^\x07]*\x07)/g, "");
+  const fmt = (s) => "\x1b[0m" + s.replace(/ /g, "\u00A0");
+  const fullLine = parts.join(SEP);
+  const cols = process.stdout.columns || process.stderr.columns
+    || parseInt(process.env.COLUMNS) || 0;
+
+  if (cols > 0 && strip(fullLine).length > cols) {
+    console.log(fmt(parts.slice(0, usageStart).join(SEP)));
+    console.log(fmt(parts.slice(usageStart).join(SEP)));
+  } else {
+    console.log(fmt(fullLine));
+  }
 }
 
 main();

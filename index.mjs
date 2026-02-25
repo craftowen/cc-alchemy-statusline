@@ -28,7 +28,7 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 // --- Windows UTF-8 setup ---
 if (IS_WIN) {
   try {
-    execFileSync("chcp.com", ["65001"], { stdio: "ignore" });
+    execFileSync("chcp.com", ["65001"], { stdio: "ignore", windowsHide: true });
   } catch {}
 }
 
@@ -78,6 +78,7 @@ function exec(cmd, args, cwd) {
       encoding: "utf8",
       timeout: 2000,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     }).trim();
   } catch {
     return "";
@@ -149,7 +150,7 @@ foreach($key in @("Claude Code-credentials","Claude Code","claude-code")){
       const raw = execFileSync(
         "powershell",
         ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
-        { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"] }
+        { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
       ).trim();
       if (raw) {
         const token = JSON.parse(raw)?.claudeAiOauth?.accessToken;
@@ -229,18 +230,11 @@ function fetchUsage() {
   if (!token) return;
 
   // Always background — never block the statusline output
-  if (IS_WIN) {
-    spawn(process.execPath, [SCRIPT_PATH, "--fetch-only"], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    }).unref();
-  } else {
-    spawn(process.execPath, [SCRIPT_PATH, "--fetch-only"], {
-      detached: true,
-      stdio: "ignore",
-    }).unref();
-  }
+  spawn(process.execPath, [SCRIPT_PATH, "--fetch-only"], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  }).unref();
 }
 
 async function fetchOnly() {

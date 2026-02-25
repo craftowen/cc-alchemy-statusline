@@ -12,7 +12,7 @@
  * No external dependencies — Node.js stdlib only.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, openSync, closeSync } from "fs";
 import { join } from "path";
 import { homedir, platform } from "os";
 import { execFileSync, spawn } from "child_process";
@@ -62,6 +62,28 @@ function ftok(n) {
 
 const osc8 = (url, text) =>
   USE_COLOR ? `\x1b]8;;${url}\x07${text}\x1b]8;;\x07` : text;
+
+function getTermCols() {
+  if (process.stdout.columns) return process.stdout.columns;
+  if (process.stderr.columns) return process.stderr.columns;
+  if (process.env.COLUMNS) return parseInt(process.env.COLUMNS) || 0;
+  if (!IS_WIN) {
+    let fd;
+    try {
+      fd = openSync("/dev/tty", "r");
+      const size = execFileSync("stty", ["size"], {
+        encoding: "utf8",
+        timeout: 500,
+        stdio: [fd, "pipe", "pipe"],
+      }).trim();
+      const cols = parseInt(size.split(" ")[1]);
+      if (cols > 0) return cols;
+    } catch {} finally {
+      if (fd != null) try { closeSync(fd); } catch {}
+    }
+  }
+  return 0;
+}
 
 function loadJson(path) {
   try {
@@ -353,8 +375,7 @@ function main() {
   const strip = (s) => s.replace(/\x1b(?:\[[0-9;]*m|\]8;;[^\x07]*\x07)/g, "");
   const fmt = (s) => "\x1b[0m" + s.replace(/ /g, "\u00A0");
   const fullLine = parts.join(SEP);
-  const cols = process.stdout.columns || process.stderr.columns
-    || parseInt(process.env.COLUMNS) || 0;
+  const cols = getTermCols();
 
   if (cols > 0 && strip(fullLine).length > cols) {
     console.log(fmt(parts.slice(0, usageStart).join(SEP)));

@@ -286,9 +286,13 @@ function main() {
     return;
   }
 
-  // Read cache FIRST, output immediately, then trigger background refresh
+  // Read cache FIRST, output immediately, then trigger background refresh if stale
   const cache = loadJson(CACHE_FILE);
-  fetchUsage();
+  const CACHE_TTL_MS = 10_000; // 10 seconds
+  const cacheAge = cache.cached_at
+    ? Date.now() - new Date(cache.cached_at).getTime()
+    : Infinity;
+  if (cacheAge > CACHE_TTL_MS) fetchUsage();
 
   const SEP = ` ${DIM}|${RST} `;
   const parts = [];

@@ -16,7 +16,7 @@ import { readFileSync, writeFileSync, existsSync, openSync, closeSync } from "fs
 import { join } from "path";
 import { homedir, platform } from "os";
 import { execFileSync, spawn } from "child_process";
-import { request } from "https";
+import http2 from "http2";
 import { fileURLToPath } from "url";
 
 const IS_WIN = platform() === "win32";
@@ -207,42 +207,41 @@ foreach($key in @("Claude Code-credentials","Claude Code","claude-code")){
   return null;
 }
 
-// --- Usage fetch ---
+// --- Usage fetch (HTTP/2 + user-agent required by Anthropic API) ---
 function doFetchRequest(token) {
   return new Promise((resolve) => {
-    const req = request(
-      {
-        hostname: "api.anthropic.com",
-        path: "/api/oauth/usage",
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "anthropic-beta": "oauth-2025-04-20",
-          "anthropic-version": "2023-06-01",
-        },
-        timeout: 5000,
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (d) => (body += d));
-        res.on("end", () => {
-          try {
-            const data = JSON.parse(body);
-            const cache = { cached_at: new Date().toISOString() };
-            for (const key of ["five_hour", "seven_day"]) {
-              if (data[key]) cache[key] = data[key];
-            }
-            writeFileSync(CACHE_FILE, JSON.stringify(cache));
-          } catch {}
-          resolve();
-        });
-      }
-    );
-    req.on("error", () => resolve());
-    req.on("timeout", () => {
-      req.destroy();
-      resolve();
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => { finish(); try { client.close(); } catch {} }, 15000);
+
+    const client = http2.connect("https://api.anthropic.com");
+    client.on("error", () => { try { client.close(); } catch {} finish(); });
+
+    const req = client.request({
+      ":method": "GET",
+      ":path": "/api/oauth/usage",
+      authorization: `Bearer ${token}`,
+      "anthropic-beta": "oauth-2025-04-20",
+      "anthropic-version": "2023-06-01",
+      "user-agent": "cc-alchemy-statusline/1.4.7",
+      accept: "*/*",
     });
+
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body);
+        const cache = { cached_at: new Date().toISOString() };
+        for (const key of ["five_hour", "seven_day"]) {
+          if (data[key]) cache[key] = data[key];
+        }
+        writeFileSync(CACHE_FILE, JSON.stringify(cache));
+      } catch {}
+      try { client.close(); } catch {}
+      finish();
+    });
+    req.on("error", () => { try { client.close(); } catch {} finish(); });
     req.end();
   });
 }

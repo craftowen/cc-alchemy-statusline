@@ -309,7 +309,7 @@ function main() {
 
   // Read cache FIRST, output immediately, then trigger background refresh if stale
   const cache = loadJson(CACHE_FILE);
-  const CACHE_TTL_MS = 10_000; // 10 seconds
+  const CACHE_TTL_MS = 30_000; // 30 seconds
   const cacheAge = cache.cached_at
     ? Date.now() - new Date(cache.cached_at).getTime()
     : Infinity;

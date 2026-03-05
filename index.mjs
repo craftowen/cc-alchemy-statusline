@@ -22,6 +22,7 @@ import { fileURLToPath } from "url";
 const IS_WIN = platform() === "win32";
 const HOME = homedir();
 const CACHE_FILE = join(HOME, ".claude", "statusline_cache.json");
+const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
@@ -232,7 +233,16 @@ function doFetchRequest(token) {
     req.on("end", () => {
       try {
         const data = JSON.parse(body);
-        if (data.error) { try { client.close(); } catch {} finish(); return; }
+        if (data.error) {
+          // Write backoff marker — exponential backoff on rate limit
+          const bf = loadJson(BACKOFF_FILE);
+          const count = (bf.count || 0) + 1;
+          const delaySec = Math.min(300 * Math.pow(2, count - 1), 3600); // 5min → 10min → 20min → max 1h
+          writeFileSync(BACKOFF_FILE, JSON.stringify({ count, retry_after: new Date(Date.now() + delaySec * 1000).toISOString() }));
+          try { client.close(); } catch {} finish(); return;
+        }
+        // Success — clear backoff and write cache
+        try { if (existsSync(BACKOFF_FILE)) writeFileSync(BACKOFF_FILE, "{}"); } catch {}
         const cache = { cached_at: new Date().toISOString() };
         for (const key of ["five_hour", "seven_day"]) {
           if (data[key]) cache[key] = data[key];
@@ -314,7 +324,12 @@ function main() {
   const cacheAge = cache.cached_at
     ? Date.now() - new Date(cache.cached_at).getTime()
     : Infinity;
-  if (cacheAge > CACHE_TTL_MS) fetchUsage();
+  if (cacheAge > CACHE_TTL_MS) {
+    // Check backoff — skip fetch if still in rate-limit cooldown
+    const bf = loadJson(BACKOFF_FILE);
+    const retryAfter = bf.retry_after ? new Date(bf.retry_after).getTime() : 0;
+    if (Date.now() >= retryAfter) fetchUsage();
+  }
 
   const SEP = ` ${DIM}|${RST} `;
   const parts = [];

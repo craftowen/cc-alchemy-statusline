@@ -232,6 +232,7 @@ function doFetchRequest(token) {
     req.on("end", () => {
       try {
         const data = JSON.parse(body);
+        if (data.error) { try { client.close(); } catch {} finish(); return; }
         const cache = { cached_at: new Date().toISOString() };
         for (const key of ["five_hour", "seven_day"]) {
           if (data[key]) cache[key] = data[key];

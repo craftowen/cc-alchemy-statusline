@@ -309,7 +309,7 @@ function main() {
 
   // Read cache FIRST, output immediately, then trigger background refresh if stale
   const cache = loadJson(CACHE_FILE);
-  const CACHE_TTL_MS = 30_000; // 30 seconds
+  const CACHE_TTL_MS = 300_000; // 5 minutes — prevents OAuth API rate limiting
   const cacheAge = cache.cached_at
     ? Date.now() - new Date(cache.cached_at).getTime()
     : Infinity;

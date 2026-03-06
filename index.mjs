@@ -109,17 +109,25 @@ function exec(cmd, args, cwd) {
 }
 
 function gitInfo(cwd) {
-  let br = exec("git", ["branch", "--show-current"], cwd);
-  if (!br) br = exec("git", ["rev-parse", "--short", "HEAD"], cwd).slice(0, 7);
-  if (!br) return { branch: "", dirty: false, remote: "" };
+  const out = exec("git", ["status", "--porcelain=v2", "--branch"], cwd);
+  if (!out) return { branch: "", dirty: false, remote: "" };
 
-  const dirty = exec("git", ["status", "--porcelain"], cwd).length > 0;
+  let branch = "", oid = "", dirty = false;
+  for (const line of out.split("\n")) {
+    if (line.startsWith("# branch.head ")) branch = line.slice(14);
+    else if (line.startsWith("# branch.oid ")) oid = line.slice(13, 20);
+    else if (line.length > 0 && !line.startsWith("#")) { dirty = true; break; }
+  }
+
+  if (branch === "(detached)" || !branch) branch = oid;
+  if (!branch) return { branch: "", dirty: false, remote: "" };
+
   let url = exec("git", ["remote", "get-url", "origin"], cwd);
   if (url.startsWith("git@github.com:"))
     url = url.replace("git@github.com:", "https://github.com/");
   if (url.endsWith(".git")) url = url.slice(0, -4);
 
-  return { branch: br, dirty, remote: url };
+  return { branch, dirty, remote: url };
 }
 
 // --- Token retrieval ---
@@ -224,7 +232,7 @@ function doFetchRequest(token) {
       authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
       "anthropic-version": "2023-06-01",
-      "user-agent": "cc-alchemy-statusline/1.4.7",
+      "user-agent": "cc-alchemy-statusline/1.5.1",
       accept: "*/*",
     });
 
@@ -261,16 +269,26 @@ function fetchUsage() {
   const token = getToken();
   if (!token) return;
 
+  // Prevent duplicate background fetches within 60s
+  const cache = loadJson(CACHE_FILE);
+  if (cache._fetching && (Date.now() - cache._fetching) < 60000) return;
+
+  try {
+    cache._fetching = Date.now();
+    writeFileSync(CACHE_FILE, JSON.stringify(cache));
+  } catch {}
+
   // Always background — never block the statusline output
   spawn(process.execPath, [SCRIPT_PATH, "--fetch-only"], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
+    env: { ...process.env, __CC_STATUS_TOKEN: token },
   }).unref();
 }
 
 async function fetchOnly() {
-  const token = getToken();
+  const token = process.env.__CC_STATUS_TOKEN || getToken();
   if (!token) process.exit(1);
   await doFetchRequest(token);
 }
@@ -320,7 +338,7 @@ function main() {
 
   // Read cache FIRST, output immediately, then trigger background refresh if stale
   const cache = loadJson(CACHE_FILE);
-  const CACHE_TTL_MS = 300_000; // 5 minutes — prevents OAuth API rate limiting
+  const CACHE_TTL_MS = 300_000; // 5 minutes
   const cacheAge = cache.cached_at
     ? Date.now() - new Date(cache.cached_at).getTime()
     : Infinity;

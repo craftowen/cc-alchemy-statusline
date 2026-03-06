@@ -216,6 +216,11 @@ foreach($key in @("Claude Code-credentials","Claude Code","claude-code")){
   return null;
 }
 
+function tokenFingerprint(token) {
+  if (!token || token.length < 8) return null;
+  return token.slice(-8);
+}
+
 // --- Usage fetch (HTTP/2 + user-agent required by Anthropic API) ---
 function doFetchRequest(token) {
   return new Promise((resolve) => {
@@ -232,7 +237,7 @@ function doFetchRequest(token) {
       authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
       "anthropic-version": "2023-06-01",
-      "user-agent": "cc-alchemy-statusline/1.5.1",
+      "user-agent": "cc-alchemy-statusline/1.6.0",
       accept: "*/*",
     });
 
@@ -251,7 +256,7 @@ function doFetchRequest(token) {
         }
         // Success — clear backoff and write cache
         try { if (existsSync(BACKOFF_FILE)) writeFileSync(BACKOFF_FILE, "{}"); } catch {}
-        const cache = { cached_at: new Date().toISOString() };
+        const cache = { cached_at: new Date().toISOString(), token_fp: tokenFingerprint(token) };
         for (const key of ["five_hour", "seven_day"]) {
           if (data[key]) cache[key] = data[key];
         }
@@ -342,9 +347,22 @@ function main() {
   const cacheAge = cache.cached_at
     ? Date.now() - new Date(cache.cached_at).getTime()
     : Infinity;
-  if (cacheAge > CACHE_TTL_MS) {
-    // Check backoff — skip fetch if still in rate-limit cooldown
-    const bf = loadJson(BACKOFF_FILE);
+  // Detect account change — if token fingerprint differs, invalidate cache
+  let accountChanged = false;
+  if (cache.token_fp) {
+    const currentFp = tokenFingerprint(getToken());
+    if (currentFp && currentFp !== cache.token_fp) {
+      accountChanged = true;
+      delete cache.five_hour;
+      delete cache.seven_day;
+    }
+  }
+
+  if (accountChanged || cacheAge > CACHE_TTL_MS) {
+    if (accountChanged) {
+      try { if (existsSync(BACKOFF_FILE)) writeFileSync(BACKOFF_FILE, "{}"); } catch {}
+    }
+    const bf = accountChanged ? {} : loadJson(BACKOFF_FILE);
     const retryAfter = bf.retry_after ? new Date(bf.retry_after).getTime() : 0;
     if (Date.now() >= retryAfter) fetchUsage();
   }

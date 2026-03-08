@@ -12,7 +12,7 @@
  * No external dependencies — Node.js stdlib only.
  */
 
-import { readFileSync, writeFileSync, existsSync, openSync, closeSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, openSync, closeSync, readdirSync, statSync, readSync } from "fs";
 import { join } from "path";
 import { homedir, platform } from "os";
 import { execFileSync, spawn } from "child_process";
@@ -237,7 +237,7 @@ function doFetchRequest(token) {
       authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
       "anthropic-version": "2023-06-01",
-      "user-agent": "cc-alchemy-statusline/1.6.0",
+      "user-agent": "cc-alchemy-statusline/1.7.0",
       accept: "*/*",
     });
 
@@ -296,6 +296,64 @@ async function fetchOnly() {
   const token = process.env.__CC_STATUS_TOKEN || getToken();
   if (!token) process.exit(1);
   await doFetchRequest(token);
+}
+
+// --- Last user prompt from current session ---
+const HISTORY_FILE = join(HOME, ".claude", "history.jsonl");
+
+function getLastPrompt(cwd) {
+  try {
+    if (!existsSync(HISTORY_FILE)) return "";
+
+    // Find current session ID from the most recent session file
+    const projectDir = cwd.replace(/\//g, "-");
+    const projectPath = join(HOME, ".claude", "projects", projectDir);
+    if (!existsSync(projectPath)) return "";
+
+    const files = readdirSync(projectPath).filter((f) => f.endsWith(".jsonl"));
+    if (!files.length) return "";
+
+    let latest = files[0],
+      latestTime = 0;
+    for (const f of files) {
+      const mt = statSync(join(projectPath, f)).mtimeMs;
+      if (mt > latestTime) {
+        latestTime = mt;
+        latest = f;
+      }
+    }
+    const sessionId = latest.replace(".jsonl", "");
+
+    // Read last 16KB of history file to find last prompt for this session
+    const st = statSync(HISTORY_FILE);
+    const CHUNK = 16384;
+    const size = Math.min(CHUNK, st.size);
+    const start = st.size - size;
+    const buf = Buffer.alloc(size);
+    const fd = openSync(HISTORY_FILE, "r");
+    readSync(fd, buf, 0, size, start);
+    closeSync(fd);
+
+    const text = buf.toString("utf8");
+    const firstNl = start > 0 ? text.indexOf("\n") : -1;
+    const lines = text
+      .slice(firstNl + 1)
+      .split("\n")
+      .filter((l) => l.trim());
+
+    // Reverse search for last entry matching this session
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i]);
+        if (entry.sessionId === sessionId && entry.display?.trim()) {
+          return entry.display.trim();
+        }
+      } catch {}
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 // --- Main ---
@@ -433,6 +491,19 @@ function main() {
     console.log(fmt(parts.slice(usageStart).join(SEP)));
   } else {
     console.log(fmt(fullLine));
+  }
+
+  // Last user prompt (up to 2 lines)
+  const prompt = getLastPrompt(cwd);
+  if (prompt) {
+    const maxCols = cols > 0 ? cols : 80;
+    const clean = prompt.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ");
+    const maxLen = maxCols * 2 - 2;
+    let display = clean.length > maxLen ? clean.slice(0, maxLen - 1) + "…" : clean;
+    const line1 = display.slice(0, maxCols);
+    const line2 = display.slice(maxCols);
+    console.log(fmt(`${DIM}▸ ${TEXT}${line1}${RST}`));
+    if (line2) console.log(fmt(`${DIM}  ${TEXT}${line2}${RST}`));
   }
 }
 

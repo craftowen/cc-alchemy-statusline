@@ -373,7 +373,7 @@ function main() {
       }
     } catch {}
 
-    const cmd = "npx cc-alchemy-statusline";
+    const cmd = "npx -y cc-alchemy-statusline";
     if (settings?.statusLine?.command === cmd) {
       console.log("✓ Already configured as Claude Code statusline.");
     } else {

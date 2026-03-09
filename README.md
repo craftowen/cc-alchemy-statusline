@@ -1,35 +1,50 @@
 # cc-alchemy-statusline
 
-Claude Code statusline — 구독 사용량, Git 브랜치, 컨텍스트 윈도우를 한 줄로 표시합니다.
+A feature-rich Claude Code statusline that displays subscription usage, git branch, context window, and your last prompt — all in one glance.
+
+[한국어](./README.ko.md)
 
 ![preview](./preview.svg)
 
 ```
 Sonnet 4.5 | main | 24k/200k | 5h 2% (3h51m) | 7d 9% (3d9h)
+▸ Your last prompt is displayed here
 ```
 
-- **모델명** — 현재 사용 중인 Claude 모델
-- **Git 브랜치** — 현재 브랜치 (dirty면 `*` 표시, 클릭하면 GitHub 이동)
-- **컨텍스트** — 사용량/전체 (예: `24k/200k`)
-- **5h / 7d** — 구독 사용률 및 리셋까지 남은 시간
+## Features
 
-## 설치
+- **Model name** — Currently active Claude model
+- **Git branch** — Current branch (`*` if dirty, clickable link to GitHub)
+- **Context window** — Used / total tokens (e.g. `24k/200k`)
+- **5h / 7d usage** — Subscription utilization with time until reset
+- **Last prompt** — Your most recent message in the current session (up to 2 lines)
+- **Color-coded** — Green / Yellow / Red based on usage percentage
+- **Zero dependencies** — Pure Node.js stdlib, no npm packages required
+- **Cross-platform** — macOS, Linux, Windows
 
-아무 PC에서나 아래 명령어 한 줄이면 자동 설정됩니다.
+## Install
+
+One command to auto-configure:
 
 ```bash
-npx cc-alchemy-statusline
+npx -y cc-alchemy-statusline
 ```
 
-Claude Code를 재시작하면 바로 적용됩니다.
+Restart Claude Code and you're done.
 
-## 요구사항
+## How It Works
+
+The statusline reads data from:
+1. **Claude Code stdin** — Model info, workspace, context window
+2. **Anthropic API** — 5-hour and 7-day subscription usage (cached, background refresh)
+3. **Git CLI** — Branch name, dirty state, remote URL
+4. **Session history** — Last user prompt from `~/.claude/history.jsonl`
+
+## Requirements
 
 - Node.js 18+
-- Claude Code CLI (로그인 상태)
+- Claude Code CLI (logged in)
 
-## 지원 플랫폼
+## License
 
-- macOS
-- Linux
-- Windows
+MIT

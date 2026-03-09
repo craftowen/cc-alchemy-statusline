@@ -12,11 +12,12 @@
  * No external dependencies — Node.js stdlib only.
  */
 
-import { readFileSync, writeFileSync, existsSync, openSync, closeSync, readdirSync, statSync, readSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, openSync, closeSync, statSync, readSync, mkdirSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir, platform } from "os";
 import { execFileSync, spawn } from "child_process";
 import http2 from "http2";
+import https from "https";
 import { fileURLToPath } from "url";
 
 const IS_WIN = platform() === "win32";
@@ -25,6 +26,11 @@ const CACHE_FILE = join(HOME, ".claude", "statusline_cache.json");
 const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
+
+const CURRENT_VERSION = "1.8.0";
+const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
+const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
+const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
 
 // --- Windows UTF-8 setup ---
 if (IS_WIN) {
@@ -52,6 +58,7 @@ const DIRTY = rgb(250, 179, 135);
 const GREEN = rgb(166, 227, 161);
 const YELLOW = rgb(249, 226, 175);
 const RED = rgb(243, 139, 168);
+const MODEL = rgb(147, 153, 178);
 
 const pcolor = (p) => (p < 50 ? GREEN : p < 90 ? YELLOW : RED);
 
@@ -237,7 +244,7 @@ function doFetchRequest(token) {
       authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
       "anthropic-version": "2023-06-01",
-      "user-agent": "cc-alchemy-statusline/1.7.0",
+      "user-agent": `cc-alchemy-statusline/${CURRENT_VERSION}`,
       accept: "*/*",
     });
 
@@ -298,33 +305,101 @@ async function fetchOnly() {
   await doFetchRequest(token);
 }
 
+// --- Auto-update ---
+function isNewerVersion(latest, current) {
+  const parse = (v) => v.split(".").map((n) => parseInt(n) || 0);
+  const [l, c] = [parse(latest), parse(current)];
+  for (let i = 0; i < 3; i++) {
+    if ((l[i] || 0) > (c[i] || 0)) return true;
+    if ((l[i] || 0) < (c[i] || 0)) return false;
+  }
+  return false;
+}
+
+function httpsGet(url) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 15000);
+    const follow = (u) => {
+      https.get(u, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          const loc = res.headers.location;
+          follow(loc?.startsWith("/") ? "https://unpkg.com" + loc : loc);
+          res.resume();
+          return;
+        }
+        let body = "";
+        res.on("data", (d) => (body += d));
+        res.on("end", () => { clearTimeout(timer); resolve(body); });
+      }).on("error", () => { clearTimeout(timer); resolve(null); });
+    };
+    follow(url);
+  });
+}
+
+async function doUpdateCheck() {
+  try {
+    // Fetch latest version from npm
+    const raw = await httpsGet("https://registry.npmjs.org/cc-alchemy-statusline/latest");
+    if (!raw) return;
+    const latest = JSON.parse(raw).version;
+    if (!latest) return;
+
+    const vi = loadJson(VERSION_FILE);
+    vi.last_check = new Date().toISOString();
+    delete vi._checking;
+
+    if (!isNewerVersion(latest, CURRENT_VERSION)) {
+      writeFileSync(VERSION_FILE, JSON.stringify(vi));
+      return;
+    }
+
+    // Download new script from unpkg
+    const script = await httpsGet(`https://unpkg.com/cc-alchemy-statusline@${latest}/index.mjs`);
+    if (!script || !script.startsWith("#!/usr/bin/env node")) {
+      writeFileSync(VERSION_FILE, JSON.stringify(vi));
+      return;
+    }
+
+    // Atomic write: temp → rename
+    const tmp = LOCAL_SCRIPT + ".tmp";
+    writeFileSync(tmp, script);
+    renameSync(tmp, LOCAL_SCRIPT);
+
+    vi.version = latest;
+    vi.updated_at = new Date().toISOString();
+    writeFileSync(VERSION_FILE, JSON.stringify(vi));
+  } catch {}
+}
+
+function checkForUpdates() {
+  // Only auto-update if running from the local install path
+  if (SCRIPT_PATH !== LOCAL_SCRIPT) return;
+
+  const vi = loadJson(VERSION_FILE);
+  const lastCheck = vi.last_check ? new Date(vi.last_check).getTime() : 0;
+  if (Date.now() - lastCheck < VERSION_CHECK_MS) return;
+
+  // Prevent duplicate checks
+  if (vi._checking && (Date.now() - vi._checking) < 60000) return;
+  try {
+    vi._checking = Date.now();
+    writeFileSync(VERSION_FILE, JSON.stringify(vi));
+  } catch {}
+
+  spawn(process.execPath, [SCRIPT_PATH, "--update-check"], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  }).unref();
+}
+
 // --- Last user prompt from current session ---
 const HISTORY_FILE = join(HOME, ".claude", "history.jsonl");
 
-function getLastPrompt(cwd) {
+function getLastPrompt(sessionId) {
   try {
-    if (!existsSync(HISTORY_FILE)) return "";
+    if (!sessionId || !existsSync(HISTORY_FILE)) return "";
 
-    // Find current session ID from the most recent session file
-    const projectDir = cwd.replace(/\//g, "-");
-    const projectPath = join(HOME, ".claude", "projects", projectDir);
-    if (!existsSync(projectPath)) return "";
-
-    const files = readdirSync(projectPath).filter((f) => f.endsWith(".jsonl"));
-    if (!files.length) return "";
-
-    let latest = files[0],
-      latestTime = 0;
-    for (const f of files) {
-      const mt = statSync(join(projectPath, f)).mtimeMs;
-      if (mt > latestTime) {
-        latestTime = mt;
-        latest = f;
-      }
-    }
-    const sessionId = latest.replace(".jsonl", "");
-
-    // Read last 16KB of history file to find last prompt for this session
     const st = statSync(HISTORY_FILE);
     const CHUNK = 16384;
     const size = Math.min(CHUNK, st.size);
@@ -341,7 +416,6 @@ function getLastPrompt(cwd) {
       .split("\n")
       .filter((l) => l.trim());
 
-    // Reverse search for last entry matching this session
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const entry = JSON.parse(lines[i]);
@@ -363,23 +437,36 @@ function main() {
     return;
   }
 
-  // If stdin is a TTY (direct terminal run), auto-configure Claude Code statusline
-  if (process.stdin.isTTY) {
-    const settingsPath = join(HOME, ".claude", "settings.json");
-    let settings = {};
-    try {
-      if (existsSync(settingsPath)) {
-        settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-      }
-    } catch {}
+  if (process.argv.includes("--update-check")) {
+    doUpdateCheck();
+    return;
+  }
 
-    const cmd = "npx -y cc-alchemy-statusline";
+  // If stdin is a TTY (direct terminal run), install locally and configure
+  if (process.stdin.isTTY) {
+    const claudeDir = join(HOME, ".claude");
+    if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+
+    // Copy script to local path
+    writeFileSync(LOCAL_SCRIPT, readFileSync(SCRIPT_PATH, "utf8"));
+    writeFileSync(VERSION_FILE, JSON.stringify({
+      version: CURRENT_VERSION,
+      installed_at: new Date().toISOString(),
+      last_check: new Date().toISOString(),
+    }));
+
+    // Configure Claude Code settings
+    const settingsPath = join(claudeDir, "settings.json");
+    let settings = loadJson(settingsPath);
+    const cmd = `node ${LOCAL_SCRIPT}`;
     if (settings?.statusLine?.command === cmd) {
-      console.log("✓ Already configured as Claude Code statusline.");
+      console.log("✓ Already configured (v" + CURRENT_VERSION + ").");
     } else {
       settings.statusLine = { type: "command", command: cmd };
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      console.log("✓ Claude Code statusline configured!");
+      console.log("✓ Statusline v" + CURRENT_VERSION + " installed!");
+      console.log("  Location: " + LOCAL_SCRIPT);
+      console.log("  Auto-updates every 24h.");
       console.log("  Restart Claude Code to apply.");
     }
     return;
@@ -398,6 +485,9 @@ function main() {
     console.log("No data");
     return;
   }
+
+  // Background: check for updates
+  checkForUpdates();
 
   // Read cache FIRST, output immediately, then trigger background refresh if stale
   const cache = loadJson(CACHE_FILE);
@@ -431,7 +521,7 @@ function main() {
   // Model
   const model = data.model || {};
   const name = (model.display_name || model.id || "?").replace("Claude ", "");
-  parts.push(`${TEXT}${name}${RST}`);
+  parts.push(`${MODEL}${name}${RST}`);
 
   // Git branch
   const cwd = data.workspace?.current_dir || process.cwd();
@@ -494,7 +584,7 @@ function main() {
   }
 
   // Last user prompt (up to 2 lines)
-  const prompt = getLastPrompt(cwd);
+  const prompt = getLastPrompt(data.session_id);
   if (prompt) {
     const maxCols = cols > 0 ? cols : 80;
     const clean = prompt.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ");

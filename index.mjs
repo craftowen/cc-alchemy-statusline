@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.8.0";
+const CURRENT_VERSION = "1.9.0";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -59,6 +59,7 @@ const GREEN = rgb(166, 227, 161);
 const YELLOW = rgb(249, 226, 175);
 const RED = rgb(243, 139, 168);
 const MODEL = rgb(147, 153, 178);
+const TIME = rgb(203, 166, 247); // mauve — prompt timestamp
 
 const pcolor = (p) => (p < 50 ? GREEN : p < 90 ? YELLOW : RED);
 
@@ -70,6 +71,52 @@ function ftok(n) {
 
 const osc8 = (url, text) =>
   USE_COLOR ? `\x1b]8;;${url}\x07${text}\x1b]8;;\x07` : text;
+
+// Visual width: CJK / fullwidth chars = 2 columns, others = 1
+function vwidth(str) {
+  let w = 0;
+  for (const ch of str) {
+    const cp = ch.codePointAt(0);
+    // CJK Unified, Hangul, Katakana/Hiragana, CJK Compat, Fullwidth
+    if (
+      (cp >= 0x1100 && cp <= 0x115f) || cp === 0x2329 || cp === 0x232a ||
+      (cp >= 0x2e80 && cp <= 0x303e) || (cp >= 0x3040 && cp <= 0x33bf) ||
+      (cp >= 0x3400 && cp <= 0x4dbf) || (cp >= 0x4e00 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7af) || (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe6f) || (cp >= 0xff01 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1f9ff) ||
+      (cp >= 0x20000 && cp <= 0x2fffd) || (cp >= 0x30000 && cp <= 0x3fffd)
+    ) w += 2;
+    else w += 1;
+  }
+  return w;
+}
+
+// Truncate plain text to fit within maxW visual columns, append "…" if truncated
+function vtrunc(str, maxW) {
+  const chars = [...str];
+  // Check if it fits without truncation first
+  if (vwidth(str) <= maxW) return str;
+  // Doesn't fit — truncate and add …
+  let w = 0;
+  for (let i = 0; i < chars.length; i++) {
+    const cp = chars[i].codePointAt(0);
+    const cw =
+      (cp >= 0x1100 && cp <= 0x115f) || cp === 0x2329 || cp === 0x232a ||
+      (cp >= 0x2e80 && cp <= 0x303e) || (cp >= 0x3040 && cp <= 0x33bf) ||
+      (cp >= 0x3400 && cp <= 0x4dbf) || (cp >= 0x4e00 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7af) || (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe6f) || (cp >= 0xff01 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1f9ff) ||
+      (cp >= 0x20000 && cp <= 0x2fffd) || (cp >= 0x30000 && cp <= 0x3fffd)
+        ? 2 : 1;
+    if (w + cw > maxW - 1) { // reserve 1 col for "…"
+      return chars.slice(0, i).join("") + "…";
+    }
+    w += cw;
+  }
+  return str;
+}
 
 function getTermCols() {
   if (process.stdout.columns) return process.stdout.columns;
@@ -420,11 +467,23 @@ function getLastPrompt(sessionId) {
       try {
         const entry = JSON.parse(lines[i]);
         if (entry.sessionId === sessionId && entry.display?.trim()) {
-          return entry.display.trim();
+          let d = entry.display.trim();
+          // Replace [Pasted text #N +M lines] with first line of actual content
+          const pasted = entry.pastedContents;
+          if (pasted) {
+            d = d.replace(/\[Pasted text #(\d+)[^\]]*\]/g, (_, n) => {
+              const val = pasted[n];
+              if (!val) return "";
+              const content = typeof val === "string" ? val : val.content || "";
+              const firstLine = content.split(/\r?\n/).find((l) => l.trim()) || "";
+              return firstLine.trim();
+            });
+          }
+          return { text: d.trim(), ts: entry.timestamp || 0 };
         }
       } catch {}
     }
-    return "";
+    return null;
   } catch {
     return "";
   }
@@ -575,25 +634,48 @@ function main() {
   const fmt = (s) => "\x1b[0m" + s.replace(/ /g, "\u00A0");
   const fullLine = parts.join(SEP);
   const cols = getTermCols();
+  let linesLeft = 4; // max output lines
 
-  if (cols > 0 && strip(fullLine).length > cols) {
+  if (cols > 0 && vwidth(strip(fullLine)) > cols) {
     console.log(fmt(parts.slice(0, usageStart).join(SEP)));
     console.log(fmt(parts.slice(usageStart).join(SEP)));
+    linesLeft -= 2;
   } else {
     console.log(fmt(fullLine));
+    linesLeft -= 1;
   }
 
-  // Last user prompt (up to 2 lines)
-  const prompt = getLastPrompt(data.session_id);
-  if (prompt) {
-    const maxCols = cols > 0 ? cols : 80;
-    const clean = prompt.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ");
-    const maxLen = maxCols * 2 - 2;
-    let display = clean.length > maxLen ? clean.slice(0, maxLen - 1) + "…" : clean;
-    const line1 = display.slice(0, maxCols);
-    const line2 = display.slice(maxCols);
-    console.log(fmt(`${DIM}▸ ${TEXT}${line1}${RST}`));
-    if (line2) console.log(fmt(`${DIM}  ${TEXT}${line2}${RST}`));
+  // Last user prompt — fit into remaining lines, truncate with … if needed
+  const lastPrompt = getLastPrompt(data.session_id);
+  if (lastPrompt && linesLeft > 0) {
+    const maxW = cols > 0 ? cols : 80;
+    const timeTag = lastPrompt.ts
+      ? new Date(lastPrompt.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
+      : "";
+    const clean = lastPrompt.text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ");
+    const prefixPlain = timeTag ? `▸ ${timeTag} ` : "▸ ";
+    const prefixAnsi = timeTag ? `${DIM}▸ ${TIME}${timeTag} ` : `${DIM}▸ `;
+    const prefixW = vwidth(prefixPlain);
+    const textW1 = maxW - prefixW; // available width for text on line 1
+
+    if (linesLeft >= 2 && vwidth(clean) > textW1) {
+      let w = 0, cut = 0;
+      const chars = [...clean];
+      for (cut = 0; cut < chars.length; cut++) {
+        const cw = vwidth(chars[cut]);
+        if (w + cw > textW1) break;
+        w += cw;
+      }
+      const line1Text = chars.slice(0, cut).join("");
+      const rest = chars.slice(cut).join("");
+      const indentW = vwidth("  ");
+      const t2 = vtrunc(rest, maxW - indentW);
+      console.log(fmt(`${prefixAnsi}${TEXT}${line1Text}${RST}`));
+      console.log(fmt(`${DIM}  ${TEXT}${t2}${RST}`));
+    } else {
+      const t = vtrunc(clean, textW1);
+      console.log(fmt(`${prefixAnsi}${TEXT}${t}${RST}`));
+    }
   }
 }
 

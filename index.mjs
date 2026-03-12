@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.9.0";
+const CURRENT_VERSION = "1.9.1";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -514,19 +514,40 @@ function main() {
       last_check: new Date().toISOString(),
     }));
 
-    // Configure Claude Code settings
-    const settingsPath = join(claudeDir, "settings.json");
-    let settings = loadJson(settingsPath);
+    // Find all possible Claude Code settings directories
+    const settingsDirs = [claudeDir];
+    if (IS_WIN) {
+      const appdata = process.env.APPDATA || "";
+      const localappdata = process.env.LOCALAPPDATA || "";
+      for (const d of [
+        appdata && join(appdata, "Claude"),
+        appdata && join(appdata, "claude-code"),
+        localappdata && join(localappdata, "Claude"),
+      ]) { if (d && existsSync(d)) settingsDirs.push(d); }
+    }
+
+    // Configure Claude Code settings — write to all found config dirs
     const cmd = `node ${LOCAL_SCRIPT}`;
-    if (settings?.statusLine?.command === cmd) {
-      console.log("✓ Already configured (v" + CURRENT_VERSION + ").");
-    } else {
-      settings.statusLine = { type: "command", command: cmd };
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    let wasNew = false;
+    for (const dir of settingsDirs) {
+      const sp = join(dir, "settings.json");
+      const s = loadJson(sp);
+      if (s?.statusLine?.command === cmd) continue;
+      s.statusLine = { type: "command", command: cmd };
+      try {
+        writeFileSync(sp, JSON.stringify(s, null, 2));
+        wasNew = true;
+      } catch {}
+    }
+
+    if (wasNew) {
       console.log("✓ Statusline v" + CURRENT_VERSION + " installed!");
       console.log("  Location: " + LOCAL_SCRIPT);
+      if (settingsDirs.length > 1) console.log("  Settings written to " + settingsDirs.length + " locations.");
       console.log("  Auto-updates every 24h.");
       console.log("  Restart Claude Code to apply.");
+    } else {
+      console.log("✓ Already configured (v" + CURRENT_VERSION + ").");
     }
     return;
   }

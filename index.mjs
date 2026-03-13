@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.9.1";
+const CURRENT_VERSION = "1.10.0";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -116,6 +116,48 @@ function vtrunc(str, maxW) {
     w += cw;
   }
   return str;
+}
+
+// Truncate ANSI-colored string to fit within maxW visual columns
+function vtruncAnsi(str, maxW) {
+  if (maxW <= 1) return "";
+  // Quick check — strip ANSI and measure
+  const plain = str.replace(/\x1b(?:\[[0-9;]*m|\]8;;[^\x07]*\x07)/g, "");
+  if (vwidth(plain) <= maxW) return str;
+  let w = 0, out = "", i = 0;
+  while (i < str.length) {
+    const c = str.charCodeAt(i);
+    if (c === 0x1b) {
+      const nx = str.charCodeAt(i + 1);
+      if (nx === 0x5b) { // CSI: \x1b[...m
+        let j = i + 2;
+        while (j < str.length && str.charCodeAt(j) !== 0x6d) j++;
+        out += str.slice(i, j + 1); i = j + 1; continue;
+      }
+      if (nx === 0x5d) { // OSC: \x1b]...\x07
+        let j = i + 2;
+        while (j < str.length && str.charCodeAt(j) !== 7) j++;
+        out += str.slice(i, j + 1); i = j + 1; continue;
+      }
+      out += str[i]; i++; continue;
+    }
+    const cp = str.codePointAt(i);
+    const step = cp > 0xffff ? 2 : 1;
+    const cw =
+      (cp >= 0x1100 && cp <= 0x115f) || cp === 0x2329 || cp === 0x232a ||
+      (cp >= 0x2e80 && cp <= 0x303e) || (cp >= 0x3040 && cp <= 0x33bf) ||
+      (cp >= 0x3400 && cp <= 0x4dbf) || (cp >= 0x4e00 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7af) || (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe6f) || (cp >= 0xff01 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1f9ff) ||
+      (cp >= 0x20000 && cp <= 0x2fffd) || (cp >= 0x30000 && cp <= 0x3fffd)
+        ? 2 : 1;
+    if (w + cw > maxW - 1) return out + "…\x1b[0m";
+    out += str.slice(i, i + step);
+    w += cw;
+    i += step;
+  }
+  return out;
 }
 
 function getTermCols() {
@@ -622,7 +664,6 @@ function main() {
   parts.push(`${pcolor(cp)}${ftok(ut)}${DIM}/${ftok(cs)}${RST}`);
 
   // 5h / 7d usage with reset timer
-  const usageStart = parts.length;
   const now = Date.now();
   for (const [label, key] of [
     ["5h", "five_hour"],
@@ -650,26 +691,23 @@ function main() {
     }
   }
 
-  // Auto line-wrap: split into 2 lines when terminal is too narrow
+  // Output: line 1 = prompt (optional), line 2 = metrics (always)
+  // Prompt goes FIRST so that if Claude Code only has room for 1 line,
+  // it shows the last line (metrics) — graceful degradation.
+  // stty size may return full terminal width, not split-pane width (Warp etc.).
   const strip = (s) => s.replace(/\x1b(?:\[[0-9;]*m|\]8;;[^\x07]*\x07)/g, "");
   const fmt = (s) => "\x1b[0m" + s.replace(/ /g, "\u00A0");
-  const fullLine = parts.join(SEP);
   const cols = getTermCols();
-  let linesLeft = 4; // max output lines
+  const metricsLine = parts.join(SEP);
+  const metricsW = vwidth(strip(metricsLine));
+  // Safe width for prompt: use metrics width (proven to render without wrapping)
+  const safeW = metricsW > 0 ? metricsW : (cols > 0 ? cols : 80);
 
-  if (cols > 0 && vwidth(strip(fullLine)) > cols) {
-    console.log(fmt(parts.slice(0, usageStart).join(SEP)));
-    console.log(fmt(parts.slice(usageStart).join(SEP)));
-    linesLeft -= 2;
-  } else {
-    console.log(fmt(fullLine));
-    linesLeft -= 1;
-  }
+  const outLines = [];
 
-  // Last user prompt — fit into remaining lines, truncate with … if needed
+  // Line 1 (optional): last user prompt — shown when pane has room for 2 lines
   const lastPrompt = getLastPrompt(data.session_id);
-  if (lastPrompt && linesLeft > 0) {
-    const maxW = cols > 0 ? cols : 80;
+  if (lastPrompt) {
     const timeTag = lastPrompt.ts
       ? new Date(lastPrompt.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
       : "";
@@ -677,27 +715,14 @@ function main() {
     const prefixPlain = timeTag ? `▸ ${timeTag} ` : "▸ ";
     const prefixAnsi = timeTag ? `${DIM}▸ ${TIME}${timeTag} ` : `${DIM}▸ `;
     const prefixW = vwidth(prefixPlain);
-    const textW1 = maxW - prefixW; // available width for text on line 1
-
-    if (linesLeft >= 2 && vwidth(clean) > textW1) {
-      let w = 0, cut = 0;
-      const chars = [...clean];
-      for (cut = 0; cut < chars.length; cut++) {
-        const cw = vwidth(chars[cut]);
-        if (w + cw > textW1) break;
-        w += cw;
-      }
-      const line1Text = chars.slice(0, cut).join("");
-      const rest = chars.slice(cut).join("");
-      const indentW = vwidth("  ");
-      const t2 = vtrunc(rest, maxW - indentW);
-      console.log(fmt(`${prefixAnsi}${TEXT}${line1Text}${RST}`));
-      console.log(fmt(`${DIM}  ${TEXT}${t2}${RST}`));
-    } else {
-      const t = vtrunc(clean, textW1);
-      console.log(fmt(`${prefixAnsi}${TEXT}${t}${RST}`));
-    }
+    const t = vtrunc(clean, safeW - prefixW);
+    outLines.push(fmt(`${prefixAnsi}${TEXT}${t}${RST}`));
   }
+
+  // Line 2 (always): metrics — this is the last line, always visible
+  outLines.push(fmt(cols > 0 ? vtruncAnsi(metricsLine, cols) : metricsLine));
+
+  process.stdout.write(outLines.join("\n") + "\n");
 }
 
 main();

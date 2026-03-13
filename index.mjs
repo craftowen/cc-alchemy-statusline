@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.10.0";
+const CURRENT_VERSION = "1.10.1";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -691,21 +691,15 @@ function main() {
     }
   }
 
-  // Output: line 1 = prompt (optional), line 2 = metrics (always)
-  // Prompt goes FIRST so that if Claude Code only has room for 1 line,
-  // it shows the last line (metrics) — graceful degradation.
-  // stty size may return full terminal width, not split-pane width (Warp etc.).
-  const strip = (s) => s.replace(/\x1b(?:\[[0-9;]*m|\]8;;[^\x07]*\x07)/g, "");
+  // Line 1: metrics (always), Line 2: last prompt (optional, max 60 chars)
   const fmt = (s) => "\x1b[0m" + s.replace(/ /g, "\u00A0");
   const cols = getTermCols();
   const metricsLine = parts.join(SEP);
-  const metricsW = vwidth(strip(metricsLine));
-  // Safe width for prompt: use metrics width (proven to render without wrapping)
-  const safeW = metricsW > 0 ? metricsW : (cols > 0 ? cols : 80);
+  const PROMPT_MAX_W = 60; // hard cap — prevents wrap in split panes
 
   const outLines = [];
+  outLines.push(fmt(cols > 0 ? vtruncAnsi(metricsLine, cols) : metricsLine));
 
-  // Line 1 (optional): last user prompt — shown when pane has room for 2 lines
   const lastPrompt = getLastPrompt(data.session_id);
   if (lastPrompt) {
     const timeTag = lastPrompt.ts
@@ -715,12 +709,9 @@ function main() {
     const prefixPlain = timeTag ? `▸ ${timeTag} ` : "▸ ";
     const prefixAnsi = timeTag ? `${DIM}▸ ${TIME}${timeTag} ` : `${DIM}▸ `;
     const prefixW = vwidth(prefixPlain);
-    const t = vtrunc(clean, safeW - prefixW);
+    const t = vtrunc(clean, PROMPT_MAX_W - prefixW);
     outLines.push(fmt(`${prefixAnsi}${TEXT}${t}${RST}`));
   }
-
-  // Line 2 (always): metrics — this is the last line, always visible
-  outLines.push(fmt(cols > 0 ? vtruncAnsi(metricsLine, cols) : metricsLine));
 
   process.stdout.write(outLines.join("\n") + "\n");
 }

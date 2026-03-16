@@ -642,7 +642,7 @@ function main() {
 
   // Model
   const model = data.model || {};
-  const name = (model.display_name || model.id || "?").replace("Claude ", "");
+  const name = (model.display_name || model.id || "?").replace("Claude ", "").replace(/\((\d+[KMB])\s+context\)/i, "($1)");
   parts.push(`${MODEL}${name}${RST}`);
 
   // Git branch

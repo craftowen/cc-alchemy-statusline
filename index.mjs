@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.10.1";
+const CURRENT_VERSION = "1.10.3";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -691,17 +691,17 @@ function main() {
     }
   }
 
-  // Line 1: metrics (always), Line 2: last prompt (optional, max 60 chars)
-  const fmt = (s) => "\x1b[0m" + s.replace(/ /g, "\u00A0");
-  const cols = getTermCols();
+  // Always 2-line: Line 1 = metrics, Line 2 = ▸ HH:MM prompt
+  // No NBSP — Ink's layout treats NBSP as unbreakable, hiding line 2 in narrow panes
   const metricsLine = parts.join(SEP);
-  const PROMPT_MAX_W = 60; // hard cap — prevents wrap in split panes
 
   const outLines = [];
-  outLines.push(fmt(cols > 0 ? vtruncAnsi(metricsLine, cols) : metricsLine));
+  outLines.push(metricsLine);
 
   const lastPrompt = getLastPrompt(data.session_id);
   if (lastPrompt) {
+    const cols = getTermCols();
+    const PROMPT_MAX_W = cols > 0 ? Math.min(cols, 60) : 60;
     const timeTag = lastPrompt.ts
       ? new Date(lastPrompt.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
       : "";
@@ -710,7 +710,7 @@ function main() {
     const prefixAnsi = timeTag ? `${DIM}▸ ${TIME}${timeTag} ` : `${DIM}▸ `;
     const prefixW = vwidth(prefixPlain);
     const t = vtrunc(clean, PROMPT_MAX_W - prefixW);
-    outLines.push(fmt(`${prefixAnsi}${TEXT}${t}${RST}`));
+    outLines.push(`${prefixAnsi}${TEXT}${t}${RST}`);
   }
 
   process.stdout.write(outLines.join("\n") + "\n");

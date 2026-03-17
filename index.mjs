@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.10.3";
+const CURRENT_VERSION = "1.10.4";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -692,16 +692,16 @@ function main() {
   }
 
   // Always 2-line: Line 1 = metrics, Line 2 = ▸ HH:MM prompt
-  // No NBSP — Ink's layout treats NBSP as unbreakable, hiding line 2 in narrow panes
+  // Ink yoga miscalculates height when line exceeds pane width (can't detect pane width),
+  // so hard-cap both lines to 49 visual chars to guarantee 2-line display in split panes.
+  const MAX_W = 49;
   const metricsLine = parts.join(SEP);
 
   const outLines = [];
-  outLines.push(metricsLine);
+  outLines.push(vtruncAnsi(metricsLine, MAX_W));
 
   const lastPrompt = getLastPrompt(data.session_id);
   if (lastPrompt) {
-    const cols = getTermCols();
-    const PROMPT_MAX_W = cols > 0 ? Math.min(cols, 60) : 60;
     const timeTag = lastPrompt.ts
       ? new Date(lastPrompt.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
       : "";
@@ -709,7 +709,7 @@ function main() {
     const prefixPlain = timeTag ? `▸ ${timeTag} ` : "▸ ";
     const prefixAnsi = timeTag ? `${DIM}▸ ${TIME}${timeTag} ` : `${DIM}▸ `;
     const prefixW = vwidth(prefixPlain);
-    const t = vtrunc(clean, PROMPT_MAX_W - prefixW);
+    const t = vtrunc(clean, MAX_W - prefixW);
     outLines.push(`${prefixAnsi}${TEXT}${t}${RST}`);
   }
 

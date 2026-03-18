@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.10.4";
+const CURRENT_VERSION = "1.10.5";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -692,9 +692,11 @@ function main() {
   }
 
   // Always 2-line: Line 1 = metrics, Line 2 = ▸ HH:MM prompt
-  // Ink yoga miscalculates height when line exceeds pane width (can't detect pane width),
-  // so hard-cap both lines to 49 visual chars to guarantee 2-line display in split panes.
-  const MAX_W = 49;
+  // Ink yoga miscalculates height when line exceeds pane width. getTermCols() returns
+  // full terminal width, so estimate pane width. CC_STATUSLINE_MAX_W overrides.
+  const cols = getTermCols();
+  const envW = parseInt(process.env.CC_STATUSLINE_MAX_W);
+  const MAX_W = envW > 0 ? envW : cols > 0 ? Math.max(40, cols - 2) : 60;
   const metricsLine = parts.join(SEP);
 
   const outLines = [];

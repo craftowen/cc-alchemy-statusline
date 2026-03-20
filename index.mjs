@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.10.5";
+const CURRENT_VERSION = "1.10.6";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -628,7 +628,9 @@ function main() {
     }
   }
 
-  if (accountChanged || cacheAge > CACHE_TTL_MS) {
+  // Skip API fetch if native rate_limits available from stdin (v2.1.80+)
+  const hasNativeRateLimits = data.rate_limits && (data.rate_limits["5_hour"] || data.rate_limits["7_day"]);
+  if (!hasNativeRateLimits && (accountChanged || cacheAge > CACHE_TTL_MS)) {
     if (accountChanged) {
       try { if (existsSync(BACKOFF_FILE)) writeFileSync(BACKOFF_FILE, "{}"); } catch {}
     }
@@ -664,12 +666,17 @@ function main() {
   parts.push(`${pcolor(cp)}${ftok(ut)}${DIM}/${ftok(cs)}${RST}`);
 
   // 5h / 7d usage with reset timer
+  // Prefer native rate_limits from stdin (v2.1.80+), fall back to API cache
+  const rl = data.rate_limits || {};
   const now = Date.now();
-  for (const [label, key] of [
-    ["5h", "five_hour"],
-    ["7d", "seven_day"],
+  for (const [label, key, rlKey] of [
+    ["5h", "five_hour", "5_hour"],
+    ["7d", "seven_day", "7_day"],
   ]) {
-    const period = cache[key] || {};
+    const native = rl[rlKey];
+    const period = native
+      ? { utilization: native.used_percentage, resets_at: native.resets_at }
+      : (cache[key] || {});
     const util = period.utilization;
     const resetsAt = period.resets_at;
     if (util != null) {

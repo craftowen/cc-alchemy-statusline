@@ -9,22 +9,28 @@ A feature-rich Claude Code statusline that displays subscription usage, git bran
 
 ![preview](./preview.svg)
 
-### npm Downloads
+### 📊 [npm download trends →](https://npmtrends.com/cc-alchemy-statusline)
 
-[![NPM Downloads Chart](https://npm-stat.com/charts.svg?package=cc-alchemy-statusline&from=2025-03-01)](https://npm-stat.com/charts.html?package=cc-alchemy-statusline)
+### What it looks like
 
 ```
-Sonnet 4.5 | main | 24k/200k | 5h 2% (3h51m) | 7d 9% (3d9h)
-▸ Your last prompt is displayed here
+┌─────────────────────────────────────────────────────────────────┐
+│ Opus 4.6 (1M) │ main │ 42k/1M │ 5h 2% (3h51m) │ Tasks 3/5   │
+│ ▸ 14:32 이거 깃헙 프로젝트에 npm 설치 수 그래프 보여지게 수정…  │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+- **Line 1** — Model, branch, context, usage, task progress
+- **Line 2** — `▸ HH:MM` timestamp + your last prompt (truncated to fit)
 
 ## Features
 
-- **Model name** — Currently active Claude model
+- **Model name** — Currently active Claude model (e.g. `Opus 4.6 (1M)`)
 - **Git branch** — Current branch (`*` if dirty, clickable link to GitHub)
-- **Context window** — Used / total tokens (e.g. `24k/200k`)
+- **Context window** — Used / total tokens (e.g. `42k/1M`)
 - **5h / 7d usage** — Subscription utilization with time until reset
-- **Last prompt** — Your most recent message in the current session (up to 2 lines)
+- **Task progress** — TodoWrite completion count (e.g. `Tasks 3/5`)
+- **Last prompt** — `▸ HH:MM` your most recent message, displayed on line 2
 - **Color-coded** — Green / Yellow / Red based on usage percentage
 - **Zero dependencies** — Pure Node.js stdlib, no npm packages required
 - **Cross-platform** — macOS, Linux, Windows

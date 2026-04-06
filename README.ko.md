@@ -1,25 +1,30 @@
 # cc-alchemy-statusline
 
-[![npm downloads](https://img.shields.io/npm/dm/cc-alchemy-statusline.svg?style=flat-square)](https://www.npmjs.com/package/cc-alchemy-statusline)
-[![npm version](https://img.shields.io/npm/v/cc-alchemy-statusline.svg?style=flat-square)](https://www.npmjs.com/package/cc-alchemy-statusline)
+[![npm version](https://img.shields.io/npm/v/cc-alchemy-statusline.svg)](https://www.npmjs.com/package/cc-alchemy-statusline)
+[![npm downloads](https://img.shields.io/npm/dm/cc-alchemy-statusline.svg)](https://www.npmjs.com/package/cc-alchemy-statusline)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Claude Code statusline — 구독 사용량, Git 브랜치, 컨텍스트 윈도우, 마지막 프롬프트를 표시합니다.
+> [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 전용 statusline — 모델, 브랜치, 컨텍스트, 사용량, 작업 진행률, 마지막 프롬프트를 한눈에.
 
 ![preview](./preview.svg)
 
-### 📊 [npm 다운로드 트렌드 →](https://npmtrends.com/cc-alchemy-statusline)
-
-### 실제 출력 예시
-
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Opus 4.6 (1M) │ main │ 42k/1M │ 5h 2% (3h51m) │ Tasks 3/5   │
-│ ▸ 14:32 이거 깃헙 프로젝트에 npm 설치 수 그래프 보여지게 수정…  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ Opus 4.6 (1M) │ main │ 42k/1M │ 5h 2% (3h51m) │ Tasks 3/5    │
+│ ▸ 14:32 이거 깃헙 프로젝트에 npm 설치 수 그래프 보여지게 수정…   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 - **1번째 줄** — 모델, 브랜치, 컨텍스트, 사용률, 작업 진행률
 - **2번째 줄** — `▸ HH:MM` 타임스탬프 + 마지막 프롬프트 (넘치면 잘림)
+
+## 설치
+
+```bash
+npx -y cc-alchemy-statusline
+```
+
+Claude Code를 재시작하면 바로 적용됩니다.
 
 ## 기능
 
@@ -31,24 +36,20 @@ Claude Code statusline — 구독 사용량, Git 브랜치, 컨텍스트 윈도�
 - **마지막 프롬프트** — `▸ HH:MM` 마지막으로 입력한 메시지, 2번째 줄에 표시
 - **컬러 코드** — 사용률에 따라 초록/노랑/빨강 자동 변경
 - **제로 의존성** — 순수 Node.js stdlib, npm 패키지 불필요
+- **크로스 플랫폼** — macOS, Linux, Windows
 
-## 설치
+## 작동 방식
 
-아무 PC에서나 아래 명령어 한 줄이면 자동 설정됩니다.
-
-```bash
-npx -y cc-alchemy-statusline
-```
-
-Claude Code를 재시작하면 바로 적용됩니다.
+1. **Claude Code stdin** — 모델 정보, 워크스페이스, 컨텍스트 윈도우
+2. **Anthropic API** — 5시간/7일 구독 사용률 (캐싱, 백그라운드 갱신)
+3. **Git CLI** — 브랜치명, dirty 상태, 리모트 URL
+4. **세션 히스토리** — `~/.claude/history.jsonl`에서 마지막 프롬프트
 
 ## 요구사항
 
 - Node.js 18+
 - Claude Code CLI (로그인 상태)
 
-## 지원 플랫폼
+## 라이선스
 
-- macOS
-- Linux
-- Windows
+MIT

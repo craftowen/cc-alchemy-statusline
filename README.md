@@ -1,10 +1,17 @@
 # cc-alchemy-statusline
 
+[![npm downloads](https://img.shields.io/npm/dm/cc-alchemy-statusline.svg?style=flat-square)](https://www.npmjs.com/package/cc-alchemy-statusline)
+[![npm version](https://img.shields.io/npm/v/cc-alchemy-statusline.svg?style=flat-square)](https://www.npmjs.com/package/cc-alchemy-statusline)
+
 A feature-rich Claude Code statusline that displays subscription usage, git branch, context window, and your last prompt — all in one glance.
 
 [한국어](./README.ko.md)
 
 ![preview](./preview.svg)
+
+### npm Downloads
+
+[![NPM Downloads Chart](https://npm-stat.com/charts.svg?package=cc-alchemy-statusline&from=2025-03-01)](https://npm-stat.com/charts.html?package=cc-alchemy-statusline)
 
 ```
 Sonnet 4.5 | main | 24k/200k | 5h 2% (3h51m) | 7d 9% (3d9h)

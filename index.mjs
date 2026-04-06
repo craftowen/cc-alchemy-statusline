@@ -27,7 +27,7 @@ const BACKOFF_FILE = join(HOME, ".claude", "statusline_backoff.json");
 const CREDS_FILE = join(HOME, ".claude", ".credentials.json");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
-const CURRENT_VERSION = "1.10.6";
+const CURRENT_VERSION = "1.11.0";
 const LOCAL_SCRIPT = join(HOME, ".claude", "cc-alchemy-statusline.mjs");
 const VERSION_FILE = join(HOME, ".claude", "statusline_version.json");
 const VERSION_CHECK_MS = 24 * 60 * 60 * 1000; // 24h
@@ -531,6 +531,47 @@ function getLastPrompt(sessionId) {
   }
 }
 
+// --- Todo progress from transcript ---
+function getTodoProgress(sessionId, workspaceDir) {
+  if (!sessionId || !workspaceDir) return null;
+  const projectKey = workspaceDir.replace(/[\\/]/g, "-");
+  const tpath = join(HOME, ".claude", "projects", projectKey, sessionId + ".jsonl");
+
+  try {
+    const st = statSync(tpath);
+    const CHUNK = 65536;
+    const size = Math.min(CHUNK, st.size);
+    const start = st.size - size;
+    const buf = Buffer.alloc(size);
+    const fd = openSync(tpath, "r");
+    readSync(fd, buf, 0, size, start);
+    closeSync(fd);
+
+    const text = buf.toString("utf8");
+    const firstNl = start > 0 ? text.indexOf("\n") : -1;
+    const lines = text.slice(firstNl + 1).split("\n").filter(l => l.trim());
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i]);
+        if (entry.type === "assistant" && entry.message?.content) {
+          for (const block of entry.message.content) {
+            if (block.type === "tool_use" && block.name === "TodoWrite" && block.input?.todos) {
+              const todos = block.input.todos;
+              if (todos.length === 0) return null;
+              const completed = todos.filter(t => t.status === "completed").length;
+              return { completed, total: todos.length };
+            }
+          }
+        }
+      } catch {}
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // --- Main ---
 function main() {
   if (process.argv.includes("--fetch-only")) {
@@ -696,6 +737,13 @@ function main() {
     } else {
       parts.push(`${DIM}${label} ${TEXT}--${RST}`);
     }
+  }
+
+  // Todo progress
+  const todo = getTodoProgress(data.session_id, cwd);
+  if (todo) {
+    const tc = todo.completed === todo.total ? GREEN : YELLOW;
+    parts.push(`${tc}Tasks ${todo.completed}/${todo.total}${RST}`);
   }
 
   // Always 2-line: Line 1 = metrics, Line 2 = ▸ HH:MM prompt

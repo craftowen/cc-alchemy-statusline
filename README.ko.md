@@ -1,8 +1,15 @@
 # cc-alchemy-statusline
 
+[![npm downloads](https://img.shields.io/npm/dm/cc-alchemy-statusline.svg?style=flat-square)](https://www.npmjs.com/package/cc-alchemy-statusline)
+[![npm version](https://img.shields.io/npm/v/cc-alchemy-statusline.svg?style=flat-square)](https://www.npmjs.com/package/cc-alchemy-statusline)
+
 Claude Code statusline — 구독 사용량, Git 브랜치, 컨텍스트 윈도우, 마지막 프롬프트를 표시합니다.
 
 ![preview](./preview.svg)
+
+### npm 다운로드 수
+
+[![NPM Downloads Chart](https://npm-stat.com/charts.svg?package=cc-alchemy-statusline&from=2025-03-01)](https://npm-stat.com/charts.html?package=cc-alchemy-statusline)
 
 ```
 Sonnet 4.5 | main | 24k/200k | 5h 2% (3h51m) | 7d 9% (3d9h)

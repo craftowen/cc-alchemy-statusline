@@ -165,6 +165,7 @@ function getTermCols() {
   if (process.stderr.columns) return process.stderr.columns;
   if (process.env.COLUMNS) return parseInt(process.env.COLUMNS) || 0;
   if (!IS_WIN) {
+    // /dev/tty often unavailable when CC pipes stdio; try first anyway
     let fd;
     try {
       fd = openSync("/dev/tty", "r");
@@ -177,6 +178,33 @@ function getTermCols() {
       if (cols > 0) return cols;
     } catch {} finally {
       if (fd != null) try { closeSync(fd); } catch {}
+    }
+    // Walk parent process chain to find a real controlling TTY (skip ?? entries)
+    let pid = process.ppid;
+    for (let i = 0; i < 10 && pid && pid !== 1; i++) {
+      try {
+        const tty = execFileSync("ps", ["-o", "tty=", "-p", String(pid)], {
+          encoding: "utf8", timeout: 300,
+        }).trim();
+        if (tty && tty !== "??" && tty !== "?" && tty !== "-") {
+          let ttyFd;
+          try {
+            ttyFd = openSync("/dev/" + tty, "r");
+            const size = execFileSync("stty", ["size"], {
+              encoding: "utf8", timeout: 500,
+              stdio: [ttyFd, "pipe", "pipe"],
+            }).trim();
+            const cols = parseInt(size.split(" ")[1]);
+            if (cols > 0) return cols;
+          } catch {} finally {
+            if (ttyFd != null) try { closeSync(ttyFd); } catch {}
+          }
+        }
+        const ppid = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+          encoding: "utf8", timeout: 300,
+        }).trim();
+        pid = parseInt(ppid);
+      } catch { break; }
     }
   }
   return 0;
